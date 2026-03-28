@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { connectToDatabase } from '@/lib/db/connection';
 import { verifyOTP } from '@/lib/utils/otp';
 import { signToken } from '@/lib/utils/jwt';
-import { validateMobileNumber } from '@/lib/utils/order';
+import { normalizeMobileNumber, validateMobileNumber } from '@/lib/utils/order';
 import { checkRateLimit, clearRateLimit } from '@/lib/utils/rateLimit';
 import { ApiResponse } from '@/lib/types';
 import User from '@/lib/models/User';
@@ -17,7 +17,8 @@ const verifyOtpSchema = z.object({
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { mobileNumber, otp } = verifyOtpSchema.parse(body);
+    const { mobileNumber: inputMobileNumber, otp } = verifyOtpSchema.parse(body);
+    const mobileNumber = normalizeMobileNumber(inputMobileNumber);
 
     if (!validateMobileNumber(mobileNumber)) {
       const response: ApiResponse = {

@@ -13,6 +13,19 @@ const WHATSAPP_ORDER_REJECTED_TEMPLATE =
 const WHATSAPP_ORDER_READY_TEMPLATE =
   process.env.WHATSAPP_ORDER_READY_TEMPLATE || 'order_ready_notification';
 
+function isPlaceholderEnvValue(value?: string): boolean {
+  if (!value) return true;
+
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return true;
+
+  return (
+    normalized.includes('your_') ||
+    normalized.includes('_here') ||
+    normalized.includes('change-in-production')
+  );
+}
+
 export interface WhatsAppTemplateVariable {
   [key: string]: string;
 }
@@ -115,11 +128,15 @@ async function sendWhatsAppPayload(
       };
     }
 
-    if (!WHATSAPP_TOKEN || !WHATSAPP_PHONE_ID) {
-      console.warn('WhatsApp credentials not configured');
+    if (
+      isPlaceholderEnvValue(WHATSAPP_TOKEN) ||
+      isPlaceholderEnvValue(WHATSAPP_PHONE_ID)
+    ) {
+      console.warn('WhatsApp credentials are missing or still using placeholder values');
       return {
         success: false,
-        error: 'WhatsApp service not configured',
+        error:
+          'WhatsApp service not configured. Set valid WHATSAPP_TOKEN and WHATSAPP_PHONE_ID in backend environment variables.',
       };
     }
 

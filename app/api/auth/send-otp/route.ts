@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { connectToDatabase } from '@/lib/db/connection';
 import { generateOTP, storeOTP } from '@/lib/utils/otp';
 import { sendLoginOtpMessage } from '@/lib/utils/whatsapp';
-import { validateMobileNumber } from '@/lib/utils/order';
+import { normalizeMobileNumber, validateMobileNumber } from '@/lib/utils/order';
 import { checkRateLimit } from '@/lib/utils/rateLimit';
 import { ApiResponse } from '@/lib/types';
 import OtpSession from '@/lib/models/OtpSession';
@@ -15,12 +15,13 @@ const sendOtpSchema = z.object({
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { mobileNumber } = sendOtpSchema.parse(body);
+    const { mobileNumber: inputMobileNumber } = sendOtpSchema.parse(body);
+    const mobileNumber = normalizeMobileNumber(inputMobileNumber);
 
     if (!validateMobileNumber(mobileNumber)) {
       const response: ApiResponse = {
         success: false,
-        error: 'Invalid mobile number format. Must be 10 digits.',
+        error: 'Invalid mobile number format. Use 10 digits or include +91 country code.',
       };
       return NextResponse.json(response, { status: 400 });
     }
