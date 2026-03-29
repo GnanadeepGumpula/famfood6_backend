@@ -1,13 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+const normalizeOrigin = (value: string): string => {
+  const trimmed = value.trim();
+  if (!trimmed || trimmed === '*') return trimmed;
+
+  try {
+    const parsed = new URL(trimmed);
+    return `${parsed.protocol}//${parsed.host}`.toLowerCase();
+  } catch {
+    return trimmed.replace(/\/+$/, '').toLowerCase();
+  }
+};
+
 export function proxy(request: NextRequest) {
-  const origin = request.headers.get('origin') || '';
+  const origin = normalizeOrigin(request.headers.get('origin') || '');
   const configuredOrigins = (
     process.env.ALLOWED_ORIGINS ||
     'http://localhost:5173,http://localhost:8080,http://localhost:3000'
   )
     .split(',')
-    .map((o) => o.trim())
+    .map((o) => normalizeOrigin(o))
     .filter(Boolean);
 
   const allowAllOrigins = configuredOrigins.includes('*');
