@@ -29,8 +29,10 @@ JWT_SECRET=your-generated-secret-here
 WHATSAPP_TOKEN=your_token_here
 WHATSAPP_PHONE_ID=your_phone_id_here
 
-# Update domain for your deployment
-ALLOWED_ORIGINS=http://localhost:3000,https://yourdomain.com
+# Update CORS origin policy
+# Use '*' to allow requests from any frontend origin
+# or a comma-separated list for strict allowlisting
+ALLOWED_ORIGINS=*
 
 NODE_ENV=development
 ```

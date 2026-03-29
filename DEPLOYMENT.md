@@ -44,6 +44,14 @@ Copy values from your secure local setup and add them in Vercel Project Settings
 
 Use .env.example in this repository as the source-of-truth key list.
 
+For a single deployed backend that should be callable from any frontend origin, set:
+
+- ALLOWED_ORIGINS=*
+
+For stricter security, provide a comma-separated allowlist instead:
+
+- ALLOWED_ORIGINS=https://your-frontend.vercel.app,http://localhost:8080
+
 ## 4. Production behavior to know
 
 - OTP text fallback is blocked in hosted production if WHATSAPP_OTP_TEMPLATE is missing.
