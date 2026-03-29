@@ -32,9 +32,8 @@ export function proxy(request: NextRequest) {
     !origin ||
     allowAllOrigins ||
     configuredOrigins.includes(origin) ||
-    (process.env.NODE_ENV !== 'production' &&
-      (localhostOriginPattern.test(origin) ||
-        privateNetworkOriginPattern.test(origin)));
+    localhostOriginPattern.test(origin) ||
+    privateNetworkOriginPattern.test(origin);
 
   const corsOriginHeader = allowAllOrigins ? '*' : origin;
 
