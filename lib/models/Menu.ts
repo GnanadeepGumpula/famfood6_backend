@@ -1,9 +1,7 @@
-import mongoose, { Schema, Document } from 'mongoose';
+import mongoose, { Schema } from 'mongoose';
 import { IMenu } from '@/lib/types';
 
-interface IMenuDocument extends IMenu, Document {}
-
-const menuSchema = new Schema<IMenuDocument>(
+const menuSchema = new Schema<IMenu>(
   {
     name: {
       type: String,
@@ -41,7 +39,7 @@ const menuSchema = new Schema<IMenuDocument>(
   }
 );
 
-const existingMenuModel = mongoose.models.Menu as mongoose.Model<IMenuDocument> | undefined;
+const existingMenuModel = mongoose.models.Menu as mongoose.Model<IMenu> | undefined;
 
 if (
   existingMenuModel &&
@@ -51,7 +49,7 @@ if (
 }
 
 const Menu =
-  (mongoose.models.Menu as mongoose.Model<IMenuDocument> | undefined) ||
-  mongoose.model<IMenuDocument>('Menu', menuSchema);
+  (mongoose.models.Menu as mongoose.Model<IMenu> | undefined) ||
+  mongoose.model<IMenu>('Menu', menuSchema);
 
 export default Menu;

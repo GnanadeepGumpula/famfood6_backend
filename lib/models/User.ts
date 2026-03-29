@@ -1,9 +1,7 @@
-import mongoose, { Schema, Document } from 'mongoose';
+import mongoose, { Schema } from 'mongoose';
 import { IUser } from '@/lib/types';
 
-interface IUserDocument extends IUser, Document {}
-
-const userSchema = new Schema<IUserDocument>(
+const userSchema = new Schema<IUser>(
   {
     mobileNumber: {
       type: String,
@@ -37,6 +35,6 @@ const userSchema = new Schema<IUserDocument>(
 );
 
 const User =
-  mongoose.models.User || mongoose.model<IUserDocument>('User', userSchema);
+  mongoose.models.User || mongoose.model<IUser>('User', userSchema);
 
 export default User;

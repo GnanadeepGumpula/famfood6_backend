@@ -1,3 +1,5 @@
+import type { Types } from 'mongoose';
+
 export interface UserProfile {
   name?: string;
   email?: string;
@@ -9,7 +11,7 @@ export interface LoyaltyCounter {
 }
 
 export interface IUser {
-  _id?: string;
+  _id?: string | Types.ObjectId;
   mobileNumber: string;
   profileDetails?: UserProfile;
   loyaltyCounter: LoyaltyCounter;
@@ -20,7 +22,7 @@ export interface IUser {
 }
 
 export interface IMenu {
-  _id?: string;
+  _id?: string | Types.ObjectId;
   name: string;
   description?: string;
   price: number;
@@ -34,7 +36,7 @@ export interface IMenu {
 }
 
 export interface OrderItem {
-  menuId: string;
+  menuId: string | Types.ObjectId;
   name: string;
   quantity: number;
   price: number;
@@ -50,8 +52,8 @@ export interface WhatsAppNotificationLog {
 }
 
 export interface IOrder {
-  _id?: string;
-  userId: string;
+  _id?: string | Types.ObjectId;
+  userId: string | Types.ObjectId;
   items: OrderItem[];
   paymentMethod: 'Cash' | 'Online';
   paymentStatus: 'Pending' | 'Completed' | 'Refunded';
