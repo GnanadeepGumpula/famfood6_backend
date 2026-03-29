@@ -4,6 +4,7 @@ export interface UserProfile {
   name?: string;
   email?: string;
   address?: string;
+  callNumber?: string;
 }
 
 export interface LoyaltyCounter {
@@ -15,6 +16,9 @@ export interface IUser {
   mobileNumber: string;
   profileDetails?: UserProfile;
   loyaltyCounter: LoyaltyCounter;
+  passwordHash?: string;
+  passwordUpdatedAt?: Date;
+  lastPasswordLoginAt?: Date;
   otpCode?: string;
   otpExpiresAt?: Date;
   createdAt?: Date;
@@ -43,7 +47,13 @@ export interface OrderItem {
 }
 
 export interface WhatsAppNotificationLog {
-  eventType: 'order_placed' | 'order_accepted' | 'order_rejected' | 'order_ready';
+  eventType:
+    | 'order_placed'
+    | 'order_accepted'
+    | 'order_rejected'
+    | 'order_ready'
+    | 'order_cancelled'
+    | 'order_free_reward';
   success: boolean;
   messageId?: string;
   error?: string;
@@ -64,7 +74,8 @@ export interface IOrder {
     | 'Packing'
     | 'Ready'
     | 'Delivered'
-    | 'Rejected';
+    | 'Rejected'
+    | 'Cancelled';
   tokenNumber: string;
   deliveryPIN: string;
   estimatedPrepTime?: number;

@@ -52,6 +52,7 @@ export async function GET(
         userId: order.userId,
         items: order.items,
         totalAmount: order.totalAmount,
+        isFreeOrder: order.items.some((item: any) => item.price === 0),
         orderStatus: order.orderStatus,
         paymentStatus: order.paymentStatus,
         paymentMethod: order.paymentMethod,
@@ -76,7 +77,16 @@ export async function GET(
 }
 
 const updateStatusSchema = z.object({
-  orderStatus: z.enum(['Pending', 'Accepted', 'Cooking', 'Packing', 'Ready', 'Delivered', 'Rejected']),
+  orderStatus: z.enum([
+    'Pending',
+    'Accepted',
+    'Cooking',
+    'Packing',
+    'Ready',
+    'Delivered',
+    'Rejected',
+    'Cancelled',
+  ]),
   estimatedPrepTime: z.number().optional(),
 });
 

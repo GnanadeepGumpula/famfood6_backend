@@ -1,23 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server';
+import bcrypt from 'bcryptjs';
 import { z } from 'zod';
 import { connectToDatabase } from '@/lib/db/connection';
-import { verifyOTP } from '@/lib/utils/otp';
 import { signToken } from '@/lib/utils/jwt';
 import { normalizeMobileNumber, validateMobileNumber } from '@/lib/utils/order';
-import { checkRateLimit, clearRateLimit } from '@/lib/utils/rateLimit';
+import { checkRateLimit } from '@/lib/utils/rateLimit';
 import { ApiResponse } from '@/lib/types';
 import User from '@/lib/models/User';
-import OtpSession from '@/lib/models/OtpSession';
 
-const verifyOtpSchema = z.object({
+const loginPasswordSchema = z.object({
   mobileNumber: z.string(),
-  otp: z.string(),
+  password: z.string().min(6).max(64),
 });
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { mobileNumber: inputMobileNumber, otp } = verifyOtpSchema.parse(body);
+    const { mobileNumber: inputMobileNumber, password } = loginPasswordSchema.parse(body);
     const mobileNumber = normalizeMobileNumber(inputMobileNumber);
 
     if (!validateMobileNumber(mobileNumber)) {
@@ -28,71 +27,47 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(response, { status: 400 });
     }
 
-    if (!/^[0-9]{6}$/.test(otp)) {
-      const response: ApiResponse = {
-        success: false,
-        error: 'Invalid OTP format',
-      };
-      return NextResponse.json(response, { status: 400 });
-    }
-
-    // Rate limiting: 10 verification attempts per 5 minutes per phone number
-    const rateLimitCheck = checkRateLimit(`verify-${mobileNumber}`, {
-      windowMs: 5 * 60 * 1000,
-      maxRequests: 10,
+    const rateLimitCheck = checkRateLimit(`pwd-login-${mobileNumber}`, {
+      windowMs: 10 * 60 * 1000,
+      maxRequests: 8,
     });
 
     if (!rateLimitCheck.allowed) {
       const response: ApiResponse = {
         success: false,
-        error: `Too many verification attempts. Please try again in ${rateLimitCheck.retryAfter} seconds.`,
+        error: `Too many login attempts. Please try again in ${rateLimitCheck.retryAfter} seconds.`,
       };
       return NextResponse.json(response, { status: 429 });
     }
 
     await connectToDatabase();
 
-    // Verify against OTP session collection first (reliable across server instances)
-    let isValid = false;
-
-    const otpSession = await OtpSession.findOne({ mobileNumber });
-    if (otpSession) {
-      const isExpired = new Date() > new Date(otpSession.expiresAt);
-      if (!isExpired && otpSession.otp === otp) {
-        isValid = true;
-      }
-
-      // Clear OTP after check (on success or expiry) to reduce replay risk
-      if (isValid || isExpired) {
-        await OtpSession.deleteOne({ mobileNumber });
-      }
-    }
-
-    // Backward-compatible fallback for in-memory OTPs
-    if (!isValid) {
-      isValid = verifyOTP(mobileNumber, otp);
-    }
-
-    if (!isValid) {
+    const user = await User.findOne({ mobileNumber });
+    if (!user) {
       const response: ApiResponse = {
         success: false,
-        error: 'Invalid or expired OTP',
+        error: 'User not found. Please verify with OTP first.',
+      };
+      return NextResponse.json(response, { status: 404 });
+    }
+
+    if (!user.passwordHash) {
+      const response: ApiResponse = {
+        success: false,
+        error: 'Password not set. Please login with OTP once and set a password.',
+      };
+      return NextResponse.json(response, { status: 400 });
+    }
+
+    const passwordMatches = await bcrypt.compare(password, user.passwordHash);
+    if (!passwordMatches) {
+      const response: ApiResponse = {
+        success: false,
+        error: 'Invalid mobile number or password',
       };
       return NextResponse.json(response, { status: 401 });
     }
 
-    // Find or create user
-    let user = await User.findOne({ mobileNumber });
-    if (!user) {
-      user = new User({
-        mobileNumber,
-        profileDetails: {},
-        loyaltyCounter: new Map(),
-      });
-      await user.save();
-    }
-
-    // Generate JWT token – grant admin role if phone is in ADMIN_PHONES env list
     const adminPhones = (process.env.ADMIN_PHONES || '')
       .split(',')
       .map((p) => p.trim())
@@ -105,19 +80,22 @@ export async function POST(request: NextRequest) {
       role,
     });
 
-    // Clear rate limit on successful verification
-    clearRateLimit(`verify-${mobileNumber}`);
+    await User.findByIdAndUpdate(user._id, {
+      $set: {
+        lastPasswordLoginAt: new Date(),
+      },
+    });
 
     const response: ApiResponse = {
       success: true,
-      message: 'OTP verified successfully',
+      message: 'Logged in successfully',
       data: {
         token,
         user: {
           userId: user._id.toString(),
           mobileNumber: user.mobileNumber,
           profileDetails: user.profileDetails,
-          hasPassword: Boolean(user.passwordHash),
+          hasPassword: true,
         },
       },
     };
@@ -132,10 +110,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(response, { status: 400 });
     }
 
-    console.error('Verify OTP error:', error);
+    console.error('Password login error:', error);
     const response: ApiResponse = {
       success: false,
-      error: 'Failed to verify OTP',
+      error: 'Failed to login with password',
     };
     return NextResponse.json(response, { status: 500 });
   }

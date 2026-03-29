@@ -19,6 +19,7 @@ const updateStatusSchema = z.object({
     'Ready',
     'Delivered',
     'Rejected',
+    'Cancelled',
   ]),
   estimatedPrepTime: z.number().optional(),
 });

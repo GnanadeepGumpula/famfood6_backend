@@ -4,10 +4,11 @@ import { connectToDatabase } from '@/lib/db/connection';
 import { authenticateToken, requireAdmin } from '@/lib/middleware/auth';
 import { applyLoyaltyToItems } from '@/lib/middleware/loyalty';
 import { generateTokenNumber, generateDeliveryPIN } from '@/lib/utils/order';
-import { sendOrderPlacedMessage } from '@/lib/utils/whatsapp';
+import { sendFreeOrderCongratsMessage, sendOrderPlacedMessage } from '@/lib/utils/whatsapp';
 import { ApiResponse } from '@/lib/types';
 import Order from '@/lib/models/Order';
 import User from '@/lib/models/User';
+import Menu from '@/lib/models/Menu';
 
 const createOrderSchema = z.object({
   items: z.array(
@@ -45,11 +46,49 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(response, { status: 404 });
     }
 
-    // Calculate loyalty discount
+    // Build order lines from trusted menu data so client cannot force free pricing.
+    const uniqueMenuIds = Array.from(new Set(items.map((item) => item.menuId)));
+    const menuDocuments = await Menu.find({ _id: { $in: uniqueMenuIds } }).lean();
+    const menuById = new Map(
+      menuDocuments.map((menuItem: any) => [menuItem._id.toString(), menuItem])
+    );
+
+    const normalizedItems = items.map((item) => {
+      const menuDoc = menuById.get(item.menuId);
+      if (!menuDoc) {
+        throw new Error(`Menu item not found for id ${item.menuId}`);
+      }
+
+      return {
+        menuId: menuDoc._id.toString(),
+        name: menuDoc.name,
+        quantity: item.quantity,
+        price: Number(menuDoc.price),
+      };
+    });
+
+    // Calculate loyalty discount on trusted server-side values only.
     const loyaltyResult = applyLoyaltyToItems(
-      items,
+      normalizedItems,
       Object.fromEntries(user.loyaltyCounter || new Map())
     );
+
+    const freeItems = loyaltyResult.items
+      .filter((item) => item.price === 0)
+      .map((item) => ({
+        name: item.name,
+        quantity: item.quantity,
+      }));
+
+    const itemNamesInOrder = Array.from(new Set(normalizedItems.map((item) => item.name)));
+    const loyaltyProgress = itemNamesInOrder.map((itemName) => {
+      const current = Number(loyaltyResult.loyaltyUpdates[itemName] || 0);
+      return {
+        itemName,
+        currentCount: current,
+        ordersRemainingForFree: Math.max(5 - current, 0),
+      };
+    });
 
     // Create order with processed items and amounts
     const tokenNumber = generateTokenNumber();
@@ -90,6 +129,23 @@ export async function POST(request: NextRequest) {
       }
     );
 
+    let freeRewardWhatsAppResult:
+      | { success: boolean; messageId?: string; error?: string }
+      | undefined;
+
+    if (loyaltyResult.freeItemApplied && freeItems.length > 0) {
+      const nextRemainingForPrimaryItem = loyaltyProgress.length
+        ? loyaltyProgress[0].ordersRemainingForFree
+        : 5;
+
+      freeRewardWhatsAppResult = await sendFreeOrderCongratsMessage(
+        user.mobileNumber,
+        tokenNumber,
+        freeItems,
+        nextRemainingForPrimaryItem
+      );
+    }
+
     if (!orderPlacedWhatsAppResult.success) {
       console.warn('Order WhatsApp send failed', {
         orderId: newOrder._id.toString(),
@@ -100,21 +156,41 @@ export async function POST(request: NextRequest) {
 
     await Order.findByIdAndUpdate(newOrder._id, {
       $push: {
-        whatsappNotifications: {
-          eventType: 'order_placed',
-          success: orderPlacedWhatsAppResult.success,
-          messageId: orderPlacedWhatsAppResult.messageId,
-          error: orderPlacedWhatsAppResult.error,
-          payload: {
-            orderId: newOrder._id.toString(),
-            tokenNumber,
-            totalAmount: loyaltyResult.finalAmount.toFixed(2),
-            paymentMethod,
-            estimatedPrepTime: String(estimatedPrepTime || 30),
-            deliveryPIN,
+        whatsappNotifications: [
+          {
+            eventType: 'order_placed',
+            success: orderPlacedWhatsAppResult.success,
+            messageId: orderPlacedWhatsAppResult.messageId,
+            error: orderPlacedWhatsAppResult.error,
+            payload: {
+              orderId: newOrder._id.toString(),
+              tokenNumber,
+              totalAmount: loyaltyResult.finalAmount.toFixed(2),
+              paymentMethod,
+              estimatedPrepTime: String(estimatedPrepTime || 30),
+              deliveryPIN,
+            },
+            sentAt: new Date(),
           },
-          sentAt: new Date(),
-        },
+          ...(freeRewardWhatsAppResult
+            ? [
+                {
+                  eventType: 'order_free_reward',
+                  success: freeRewardWhatsAppResult.success,
+                  messageId: freeRewardWhatsAppResult.messageId,
+                  error: freeRewardWhatsAppResult.error,
+                  payload: {
+                    orderId: newOrder._id.toString(),
+                    tokenNumber,
+                    freeItems: freeItems
+                      .map((item) => `${item.name} x${item.quantity}`)
+                      .join(', '),
+                  },
+                  sentAt: new Date(),
+                },
+              ]
+            : []),
+        ],
       },
     });
 
@@ -132,16 +208,33 @@ export async function POST(request: NextRequest) {
         estimatedPrepTime: newOrder.estimatedPrepTime,
         items: loyaltyResult.items,
         freeItemApplied: loyaltyResult.freeItemApplied,
+        freeItems,
+        loyaltyProgress,
         whatsappNotification: {
           success: orderPlacedWhatsAppResult.success,
           messageId: orderPlacedWhatsAppResult.messageId,
           error: orderPlacedWhatsAppResult.error,
         },
+        freeRewardWhatsAppNotification: freeRewardWhatsAppResult
+          ? {
+              success: freeRewardWhatsAppResult.success,
+              messageId: freeRewardWhatsAppResult.messageId,
+              error: freeRewardWhatsAppResult.error,
+            }
+          : undefined,
       },
     };
 
     return NextResponse.json(response, { status: 201 });
   } catch (error) {
+    if (error instanceof Error && error.message.startsWith('Menu item not found')) {
+      const response: ApiResponse = {
+        success: false,
+        error: error.message,
+      };
+      return NextResponse.json(response, { status: 400 });
+    }
+
     if (error instanceof z.ZodError) {
       const response: ApiResponse = {
         success: false,
@@ -185,7 +278,7 @@ export async function GET(request: NextRequest) {
     }
 
     const orders = await Order.find(query)
-      .populate('userId', 'mobileNumber')
+      .populate('userId', 'mobileNumber profileDetails')
       .sort({ createdAt: -1 })
       .limit(limit)
       .skip((page - 1) * limit);
@@ -198,8 +291,23 @@ export async function GET(request: NextRequest) {
         orders: orders.map((order) => ({
           _id: order._id.toString(),
           userId: order.userId,
+          customerName:
+            typeof order.userId === 'object'
+              ? (order.userId as any)?.profileDetails?.name || ''
+              : '',
+          customerPhone:
+            typeof order.userId === 'object'
+              ? (order.userId as any)?.mobileNumber || ''
+              : '',
+          customerCallNumber:
+            typeof order.userId === 'object'
+              ? (order.userId as any)?.profileDetails?.callNumber ||
+                (order.userId as any)?.mobileNumber ||
+                ''
+              : '',
           items: order.items,
           totalAmount: order.totalAmount,
+          isFreeOrder: order.items.some((item: any) => item.price === 0),
           orderStatus: order.orderStatus,
           paymentStatus: order.paymentStatus,
           paymentMethod: order.paymentMethod,

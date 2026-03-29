@@ -1,26 +1,32 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { connectToDatabase } from '@/lib/db/connection';
+import { authenticateToken } from '@/lib/middleware/auth';
 import { verifyOTP } from '@/lib/utils/otp';
 import { signToken } from '@/lib/utils/jwt';
 import { normalizeMobileNumber, validateMobileNumber } from '@/lib/utils/order';
 import { checkRateLimit, clearRateLimit } from '@/lib/utils/rateLimit';
 import { ApiResponse } from '@/lib/types';
-import User from '@/lib/models/User';
 import OtpSession from '@/lib/models/OtpSession';
+import User from '@/lib/models/User';
 
-const verifyOtpSchema = z.object({
-  mobileNumber: z.string(),
-  otp: z.string(),
+const verifyPhoneChangeSchema = z.object({
+  newMobileNumber: z.string(),
+  otp: z.string().regex(/^[0-9]{6}$/),
 });
 
 export async function POST(request: NextRequest) {
+  const auth = authenticateToken(request);
+  if (!auth.valid || !auth.payload) {
+    return auth.response!;
+  }
+
   try {
     const body = await request.json();
-    const { mobileNumber: inputMobileNumber, otp } = verifyOtpSchema.parse(body);
-    const mobileNumber = normalizeMobileNumber(inputMobileNumber);
+    const { newMobileNumber: inputMobileNumber, otp } = verifyPhoneChangeSchema.parse(body);
+    const newMobileNumber = normalizeMobileNumber(inputMobileNumber);
 
-    if (!validateMobileNumber(mobileNumber)) {
+    if (!validateMobileNumber(newMobileNumber)) {
       const response: ApiResponse = {
         success: false,
         error: 'Invalid mobile number format',
@@ -28,16 +34,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(response, { status: 400 });
     }
 
-    if (!/^[0-9]{6}$/.test(otp)) {
-      const response: ApiResponse = {
-        success: false,
-        error: 'Invalid OTP format',
-      };
-      return NextResponse.json(response, { status: 400 });
-    }
-
-    // Rate limiting: 10 verification attempts per 5 minutes per phone number
-    const rateLimitCheck = checkRateLimit(`verify-${mobileNumber}`, {
+    const rateLimitCheck = checkRateLimit(`verify-change-mobile-${newMobileNumber}`, {
       windowMs: 5 * 60 * 1000,
       maxRequests: 10,
     });
@@ -52,25 +49,29 @@ export async function POST(request: NextRequest) {
 
     await connectToDatabase();
 
-    // Verify against OTP session collection first (reliable across server instances)
-    let isValid = false;
+    const ownerOfNewPhone = await User.findOne({ mobileNumber: newMobileNumber });
+    if (ownerOfNewPhone && ownerOfNewPhone._id.toString() !== auth.payload.userId) {
+      const response: ApiResponse = {
+        success: false,
+        error: 'This mobile number is already in use',
+      };
+      return NextResponse.json(response, { status: 409 });
+    }
 
-    const otpSession = await OtpSession.findOne({ mobileNumber });
+    let isValid = false;
+    const otpSession = await OtpSession.findOne({ mobileNumber: newMobileNumber });
     if (otpSession) {
       const isExpired = new Date() > new Date(otpSession.expiresAt);
       if (!isExpired && otpSession.otp === otp) {
         isValid = true;
       }
-
-      // Clear OTP after check (on success or expiry) to reduce replay risk
       if (isValid || isExpired) {
-        await OtpSession.deleteOne({ mobileNumber });
+        await OtpSession.deleteOne({ mobileNumber: newMobileNumber });
       }
     }
 
-    // Backward-compatible fallback for in-memory OTPs
     if (!isValid) {
-      isValid = verifyOTP(mobileNumber, otp);
+      isValid = verifyOTP(newMobileNumber, otp);
     }
 
     if (!isValid) {
@@ -81,36 +82,35 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(response, { status: 401 });
     }
 
-    // Find or create user
-    let user = await User.findOne({ mobileNumber });
+    const user = await User.findById(auth.payload.userId);
     if (!user) {
-      user = new User({
-        mobileNumber,
-        profileDetails: {},
-        loyaltyCounter: new Map(),
-      });
-      await user.save();
+      const response: ApiResponse = {
+        success: false,
+        error: 'User not found',
+      };
+      return NextResponse.json(response, { status: 404 });
     }
 
-    // Generate JWT token – grant admin role if phone is in ADMIN_PHONES env list
+    user.mobileNumber = newMobileNumber;
+    await user.save();
+
     const adminPhones = (process.env.ADMIN_PHONES || '')
       .split(',')
       .map((p) => p.trim())
       .filter(Boolean);
-    const role: 'admin' | 'user' = adminPhones.includes(mobileNumber) ? 'admin' : 'user';
+    const role: 'admin' | 'user' = adminPhones.includes(newMobileNumber) ? 'admin' : 'user';
 
     const token = signToken({
       userId: user._id.toString(),
-      mobileNumber,
+      mobileNumber: newMobileNumber,
       role,
     });
 
-    // Clear rate limit on successful verification
-    clearRateLimit(`verify-${mobileNumber}`);
+    clearRateLimit(`verify-change-mobile-${newMobileNumber}`);
 
     const response: ApiResponse = {
       success: true,
-      message: 'OTP verified successfully',
+      message: 'Mobile number updated successfully',
       data: {
         token,
         user: {
@@ -132,10 +132,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(response, { status: 400 });
     }
 
-    console.error('Verify OTP error:', error);
+    console.error('Verify phone change OTP error:', error);
     const response: ApiResponse = {
       success: false,
-      error: 'Failed to verify OTP',
+      error: 'Failed to verify phone change OTP',
     };
     return NextResponse.json(response, { status: 500 });
   }

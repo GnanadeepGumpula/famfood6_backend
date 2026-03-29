@@ -16,11 +16,24 @@ const userSchema = new Schema<IUser>(
         match: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
       },
       address: String,
+      callNumber: {
+        type: String,
+        match: /^[0-9]{10}$/,
+      },
     },
     loyaltyCounter: {
       type: Map,
       of: Number,
       default: new Map(),
+    },
+    passwordHash: {
+      type: String,
+    },
+    passwordUpdatedAt: {
+      type: Date,
+    },
+    lastPasswordLoginAt: {
+      type: Date,
     },
     otpCode: {
       type: String,

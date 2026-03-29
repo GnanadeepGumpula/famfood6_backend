@@ -15,6 +15,10 @@ const WHATSAPP_ORDER_REJECTED_TEMPLATE =
   process.env.WHATSAPP_ORDER_REJECTED_TEMPLATE?.trim();
 const WHATSAPP_ORDER_READY_TEMPLATE =
   process.env.WHATSAPP_ORDER_READY_TEMPLATE?.trim();
+const WHATSAPP_ORDER_CANCELLED_TEMPLATE =
+  process.env.WHATSAPP_ORDER_CANCELLED_TEMPLATE?.trim();
+const WHATSAPP_FREE_ORDER_TEMPLATE =
+  process.env.WHATSAPP_FREE_ORDER_TEMPLATE?.trim();
 
 function parseParamKeys(value?: string): string[] {
   return String(value || '')
@@ -58,7 +62,9 @@ export type WhatsAppTemplateType =
   | 'order_placed'
   | 'order_accepted'
   | 'order_rejected'
-  | 'order_ready';
+  | 'order_ready'
+  | 'order_cancelled'
+  | 'free_order';
 
 interface WhatsAppMessage {
   messaging_product: string;
@@ -111,6 +117,8 @@ const templateMap: Partial<Record<WhatsAppTemplateType, string>> = {
   order_accepted: WHATSAPP_ORDER_ACCEPTED_TEMPLATE,
   order_rejected: WHATSAPP_ORDER_REJECTED_TEMPLATE,
   order_ready: WHATSAPP_ORDER_READY_TEMPLATE,
+  order_cancelled: WHATSAPP_ORDER_CANCELLED_TEMPLATE,
+  free_order: WHATSAPP_FREE_ORDER_TEMPLATE,
 };
 
 const templateParamKeyMap: Partial<Record<WhatsAppTemplateType, string[]>> = {
@@ -118,6 +126,8 @@ const templateParamKeyMap: Partial<Record<WhatsAppTemplateType, string[]>> = {
   order_accepted: parseParamKeys(process.env.WHATSAPP_ORDER_ACCEPTED_PARAM_KEYS),
   order_rejected: parseParamKeys(process.env.WHATSAPP_ORDER_REJECTED_PARAM_KEYS),
   order_ready: parseParamKeys(process.env.WHATSAPP_ORDER_READY_PARAM_KEYS),
+  order_cancelled: parseParamKeys(process.env.WHATSAPP_ORDER_CANCELLED_PARAM_KEYS),
+  free_order: parseParamKeys(process.env.WHATSAPP_FREE_ORDER_PARAM_KEYS),
 };
 
 const templateHeaderParamKeyMap: Partial<Record<WhatsAppTemplateType, string[]>> = {
@@ -125,6 +135,8 @@ const templateHeaderParamKeyMap: Partial<Record<WhatsAppTemplateType, string[]>>
   order_accepted: parseParamKeys(process.env.WHATSAPP_ORDER_ACCEPTED_HEADER_PARAM_KEYS),
   order_rejected: parseParamKeys(process.env.WHATSAPP_ORDER_REJECTED_HEADER_PARAM_KEYS),
   order_ready: parseParamKeys(process.env.WHATSAPP_ORDER_READY_HEADER_PARAM_KEYS),
+  order_cancelled: parseParamKeys(process.env.WHATSAPP_ORDER_CANCELLED_HEADER_PARAM_KEYS),
+  free_order: parseParamKeys(process.env.WHATSAPP_FREE_ORDER_HEADER_PARAM_KEYS),
 };
 
 const templateBodyParamKeyMap: Partial<Record<WhatsAppTemplateType, string[]>> = {
@@ -132,6 +144,8 @@ const templateBodyParamKeyMap: Partial<Record<WhatsAppTemplateType, string[]>> =
   order_accepted: parseParamKeys(process.env.WHATSAPP_ORDER_ACCEPTED_BODY_PARAM_KEYS),
   order_rejected: parseParamKeys(process.env.WHATSAPP_ORDER_REJECTED_BODY_PARAM_KEYS),
   order_ready: parseParamKeys(process.env.WHATSAPP_ORDER_READY_BODY_PARAM_KEYS),
+  order_cancelled: parseParamKeys(process.env.WHATSAPP_ORDER_CANCELLED_BODY_PARAM_KEYS),
+  free_order: parseParamKeys(process.env.WHATSAPP_FREE_ORDER_BODY_PARAM_KEYS),
 };
 
 const otpTemplateParamKeys = parseParamKeys(process.env.WHATSAPP_OTP_PARAM_KEYS);
@@ -688,6 +702,102 @@ export async function sendOrderReadyMessage(
       ]
         .filter(Boolean)
         .join('\n'),
+    },
+  });
+
+  if (fallbackResult.success) {
+    return fallbackResult;
+  }
+
+  return {
+    success: false,
+    error: [
+      `Template failed: ${templateResult.error || 'unknown template error'}`,
+      `Fallback text failed: ${fallbackResult.error || 'unknown fallback error'}`,
+    ].join(' | '),
+  };
+}
+
+export async function sendOrderCancelledMessage(
+  mobileNumber: string,
+  tokenNumber?: string
+): Promise<{ success: boolean; messageId?: string; error?: string }> {
+  const templateResult = await sendWhatsAppMessage(
+    mobileNumber,
+    'order_cancelled',
+    {
+      token_number: tokenNumber || '',
+      tokenNumber: tokenNumber || '',
+    }
+  );
+
+  if (templateResult.success) {
+    return templateResult;
+  }
+
+  const fallbackResult = await sendWhatsAppPayload(mobileNumber, {
+    type: 'text',
+    text: {
+      preview_url: false,
+      body: [
+        'Your famFood6 order was cancelled successfully.',
+        tokenNumber ? `Token: ${tokenNumber}` : undefined,
+      ]
+        .filter(Boolean)
+        .join('\n'),
+    },
+  });
+
+  if (fallbackResult.success) {
+    return fallbackResult;
+  }
+
+  return {
+    success: false,
+    error: [
+      `Template failed: ${templateResult.error || 'unknown template error'}`,
+      `Fallback text failed: ${fallbackResult.error || 'unknown fallback error'}`,
+    ].join(' | '),
+  };
+}
+
+export async function sendFreeOrderCongratsMessage(
+  mobileNumber: string,
+  tokenNumber: string,
+  freeItems: Array<{ name: string; quantity: number }>,
+  ordersRemainingForNextFree: number
+): Promise<{ success: boolean; messageId?: string; error?: string }> {
+  const freeItemsText = freeItems.length
+    ? freeItems.map((item) => `${item.name} x${item.quantity}`).join(', ')
+    : 'Your reward item';
+
+  const templateResult = await sendWhatsAppMessage(
+    mobileNumber,
+    'free_order',
+    {
+      token_number: tokenNumber,
+      tokenNumber,
+      free_items: freeItemsText,
+      freeItems: freeItemsText,
+      remaining_for_next_free: String(ordersRemainingForNextFree),
+      remainingForNextFree: String(ordersRemainingForNextFree),
+    }
+  );
+
+  if (templateResult.success) {
+    return templateResult;
+  }
+
+  const fallbackResult = await sendWhatsAppPayload(mobileNumber, {
+    type: 'text',
+    text: {
+      preview_url: false,
+      body: [
+        'Congratulations! Your FREE reward order is placed.',
+        `Token: ${tokenNumber}`,
+        `Free item: ${freeItemsText}`,
+        `Only ${ordersRemainingForNextFree} more order(s) of this item to unlock your next FREE reward.`,
+      ].join('\n'),
     },
   });
 

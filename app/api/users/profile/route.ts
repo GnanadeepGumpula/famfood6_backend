@@ -10,6 +10,10 @@ const updateProfileSchema = z.object({
     name: z.string().optional(),
     email: z.string().email().optional(),
     address: z.string().optional(),
+    callNumber: z
+      .string()
+      .regex(/^[0-9]{10}$/)
+      .optional(),
   }),
 });
 
@@ -37,6 +41,7 @@ export async function GET(request: NextRequest) {
         userId: user._id.toString(),
         mobileNumber: user.mobileNumber,
         profileDetails: user.profileDetails || {},
+        hasPassword: Boolean(user.passwordHash),
         loyaltyCounter: Object.fromEntries(user.loyaltyCounter || new Map()),
         createdAt: user.createdAt,
         updatedAt: user.updatedAt,
@@ -93,6 +98,7 @@ export async function PUT(request: NextRequest) {
         userId: user._id.toString(),
         mobileNumber: user.mobileNumber,
         profileDetails: user.profileDetails || {},
+        hasPassword: Boolean(user.passwordHash),
       },
     };
 
