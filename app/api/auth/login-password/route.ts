@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import bcrypt from 'bcryptjs';
+import { compare } from 'bcryptjs';
 import { z } from 'zod';
 import { connectToDatabase } from '@/lib/db/connection';
 import { signToken } from '@/lib/utils/jwt';
@@ -59,7 +59,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(response, { status: 400 });
     }
 
-    const passwordMatches = await bcrypt.compare(password, user.passwordHash);
+    let passwordMatches = false;
+    try {
+      passwordMatches = await compare(password, String(user.passwordHash));
+    } catch {
+      const response: ApiResponse = {
+        success: false,
+        error: 'Password verification is not available for this account. Please login with OTP and reset password once.',
+      };
+      return NextResponse.json(response, { status: 400 });
+    }
     if (!passwordMatches) {
       const response: ApiResponse = {
         success: false,

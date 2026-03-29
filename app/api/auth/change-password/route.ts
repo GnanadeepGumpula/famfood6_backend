@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import bcrypt from 'bcryptjs';
+import { compare, hash } from 'bcryptjs';
 import { z } from 'zod';
 import { connectToDatabase } from '@/lib/db/connection';
 import { authenticateToken } from '@/lib/middleware/auth';
@@ -40,7 +40,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(response, { status: 400 });
     }
 
-    const currentMatches = await bcrypt.compare(currentPassword, user.passwordHash);
+    const currentMatches = await compare(currentPassword, user.passwordHash);
     if (!currentMatches) {
       const response: ApiResponse = {
         success: false,
@@ -49,7 +49,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(response, { status: 401 });
     }
 
-    const passwordHash = await bcrypt.hash(newPassword, 10);
+    const passwordHash = await hash(newPassword, 10);
     user.passwordHash = passwordHash;
     user.passwordUpdatedAt = new Date();
     await user.save();

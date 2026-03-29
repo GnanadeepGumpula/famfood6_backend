@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import bcrypt from 'bcryptjs';
+import { hash } from 'bcryptjs';
 import { z } from 'zod';
 import { connectToDatabase } from '@/lib/db/connection';
 import { authenticateToken } from '@/lib/middleware/auth';
@@ -32,7 +32,7 @@ export async function POST(request: NextRequest) {
     }
 
     const saltRounds = 10;
-    const passwordHash = await bcrypt.hash(password, saltRounds);
+    const passwordHash = await hash(password, saltRounds);
 
     user.passwordHash = passwordHash;
     user.passwordUpdatedAt = new Date();
