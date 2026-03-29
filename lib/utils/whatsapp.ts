@@ -4,14 +4,24 @@ const WHATSAPP_API_VERSION = process.env.WHATSAPP_API_VERSION || 'v18.0';
 const WHATSAPP_API_URL = `https://graph.facebook.com/${WHATSAPP_API_VERSION}`;
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
 const WHATSAPP_PHONE_ID = process.env.WHATSAPP_PHONE_ID;
+const WHATSAPP_COUNTRY_CODE = process.env.WHATSAPP_COUNTRY_CODE || '91';
+const WHATSAPP_TEMPLATE_LANGUAGE =
+  process.env.WHATSAPP_TEMPLATE_LANGUAGE?.trim() || 'en_US';
 const WHATSAPP_ORDER_PLACED_TEMPLATE =
-  process.env.WHATSAPP_ORDER_PLACED_TEMPLATE || 'order_placed_notification';
+  process.env.WHATSAPP_ORDER_PLACED_TEMPLATE?.trim();
 const WHATSAPP_ORDER_ACCEPTED_TEMPLATE =
-  process.env.WHATSAPP_ORDER_ACCEPTED_TEMPLATE || 'order_accepted_notification';
+  process.env.WHATSAPP_ORDER_ACCEPTED_TEMPLATE?.trim();
 const WHATSAPP_ORDER_REJECTED_TEMPLATE =
-  process.env.WHATSAPP_ORDER_REJECTED_TEMPLATE || 'order_rejected_notification';
+  process.env.WHATSAPP_ORDER_REJECTED_TEMPLATE?.trim();
 const WHATSAPP_ORDER_READY_TEMPLATE =
-  process.env.WHATSAPP_ORDER_READY_TEMPLATE || 'order_ready_notification';
+  process.env.WHATSAPP_ORDER_READY_TEMPLATE?.trim();
+
+function parseParamKeys(value?: string): string[] {
+  return String(value || '')
+    .split(',')
+    .map((key) => key.trim())
+    .filter(Boolean);
+}
 
 function isPlaceholderEnvValue(value?: string): boolean {
   if (!value) return true;
@@ -79,12 +89,142 @@ interface WhatsAppTextMessage {
   };
 }
 
-const templateMap: Record<WhatsAppTemplateType, string> = {
+interface WhatsAppTemplatePayload {
+  type: 'template';
+  template: {
+    name: string;
+    language: {
+      code: string;
+    };
+    components: Array<{
+      type: string;
+      parameters?: Array<{
+        type: string;
+        text: string;
+      }>;
+    }>;
+  };
+}
+
+const templateMap: Partial<Record<WhatsAppTemplateType, string>> = {
   order_placed: WHATSAPP_ORDER_PLACED_TEMPLATE,
   order_accepted: WHATSAPP_ORDER_ACCEPTED_TEMPLATE,
   order_rejected: WHATSAPP_ORDER_REJECTED_TEMPLATE,
   order_ready: WHATSAPP_ORDER_READY_TEMPLATE,
 };
+
+const templateParamKeyMap: Partial<Record<WhatsAppTemplateType, string[]>> = {
+  order_placed: parseParamKeys(process.env.WHATSAPP_ORDER_PLACED_PARAM_KEYS),
+  order_accepted: parseParamKeys(process.env.WHATSAPP_ORDER_ACCEPTED_PARAM_KEYS),
+  order_rejected: parseParamKeys(process.env.WHATSAPP_ORDER_REJECTED_PARAM_KEYS),
+  order_ready: parseParamKeys(process.env.WHATSAPP_ORDER_READY_PARAM_KEYS),
+};
+
+const templateHeaderParamKeyMap: Partial<Record<WhatsAppTemplateType, string[]>> = {
+  order_placed: parseParamKeys(process.env.WHATSAPP_ORDER_PLACED_HEADER_PARAM_KEYS),
+  order_accepted: parseParamKeys(process.env.WHATSAPP_ORDER_ACCEPTED_HEADER_PARAM_KEYS),
+  order_rejected: parseParamKeys(process.env.WHATSAPP_ORDER_REJECTED_HEADER_PARAM_KEYS),
+  order_ready: parseParamKeys(process.env.WHATSAPP_ORDER_READY_HEADER_PARAM_KEYS),
+};
+
+const templateBodyParamKeyMap: Partial<Record<WhatsAppTemplateType, string[]>> = {
+  order_placed: parseParamKeys(process.env.WHATSAPP_ORDER_PLACED_BODY_PARAM_KEYS),
+  order_accepted: parseParamKeys(process.env.WHATSAPP_ORDER_ACCEPTED_BODY_PARAM_KEYS),
+  order_rejected: parseParamKeys(process.env.WHATSAPP_ORDER_REJECTED_BODY_PARAM_KEYS),
+  order_ready: parseParamKeys(process.env.WHATSAPP_ORDER_READY_BODY_PARAM_KEYS),
+};
+
+const otpTemplateParamKeys = parseParamKeys(process.env.WHATSAPP_OTP_PARAM_KEYS);
+
+function resolveTemplateVariables(
+  templateType: WhatsAppTemplateType,
+  variables: WhatsAppTemplateVariable | string[]
+): string[] {
+  if (Array.isArray(variables)) {
+    return variables.map((value) => String(value));
+  }
+
+  const configuredKeys = templateParamKeyMap[templateType] || [];
+  if (configuredKeys.length) {
+    return configuredKeys
+      .map((key) => variables[key])
+      .filter((value): value is string => value !== undefined && value !== null)
+      .map((value) => String(value));
+  }
+
+  return Object.values(variables).map((value) => String(value));
+}
+
+function resolveTemplateComponents(
+  templateType: WhatsAppTemplateType,
+  variables: WhatsAppTemplateVariable | string[]
+): Array<{ type: string; parameters?: Array<{ type: string; text: string }> }> {
+  if (Array.isArray(variables)) {
+    return variables.length
+      ? [
+          {
+            type: 'body',
+            parameters: variables.map((value) => ({
+              type: 'text',
+              text: String(value),
+            })),
+          },
+        ]
+      : [];
+  }
+
+  const headerKeys = templateHeaderParamKeyMap[templateType] || [];
+  const bodyKeys = templateBodyParamKeyMap[templateType] || [];
+
+  if (headerKeys.length || bodyKeys.length) {
+    const components: Array<{ type: string; parameters?: Array<{ type: string; text: string }> }> = [];
+
+    if (headerKeys.length) {
+      const headerParams = headerKeys
+        .map((key) => variables[key])
+        .filter((value): value is string => value !== undefined && value !== null)
+        .map((value) => ({
+          type: 'text',
+          text: String(value),
+        }));
+
+      components.push({
+        type: 'header',
+        parameters: headerParams,
+      });
+    }
+
+    if (bodyKeys.length) {
+      const bodyParams = bodyKeys
+        .map((key) => variables[key])
+        .filter((value): value is string => value !== undefined && value !== null)
+        .map((value) => ({
+          type: 'text',
+          text: String(value),
+        }));
+
+      components.push({
+        type: 'body',
+        parameters: bodyParams,
+      });
+    }
+
+    return components;
+  }
+
+  const fallbackValues = resolveTemplateVariables(templateType, variables);
+  return fallbackValues.length
+    ? [
+        {
+          type: 'body',
+          parameters: fallbackValues.map((value) => ({
+            type: 'text',
+            text: value,
+          })),
+        },
+      ]
+    : [];
+}
 
 function formatOrderItemsForMessage(
   items: OrderDetailsMessageInput['items']
@@ -115,38 +255,43 @@ async function sendWhatsAppPayload(
   mobileNumber: string,
   payload: Omit<WhatsAppMessage, 'messaging_product' | 'to'> | Omit<WhatsAppTextMessage, 'messaging_product' | 'to'>
 ): Promise<{ success: boolean; messageId?: string; error?: string }> {
-  try {
-    const normalizedNumber = String(mobileNumber || '').replace(/\D/g, '');
-    const tenDigitNumber = normalizedNumber.startsWith('91')
-      ? normalizedNumber.slice(2)
-      : normalizedNumber;
+  const normalizedNumber = String(mobileNumber || '').replace(/\D/g, '');
+  const countryCode = WHATSAPP_COUNTRY_CODE.replace(/\D/g, '');
+  const tenDigitNumber = normalizedNumber.startsWith(countryCode)
+    ? normalizedNumber.slice(countryCode.length)
+    : normalizedNumber;
 
-    if (!tenDigitNumber.match(/^[0-9]{10}$/)) {
-      return {
-        success: false,
-        error: 'Invalid mobile number format',
-      };
-    }
+  if (!tenDigitNumber.match(/^[0-9]{10}$/)) {
+    return {
+      success: false,
+      error: 'Invalid mobile number format',
+    };
+  }
 
-    if (
-      isPlaceholderEnvValue(WHATSAPP_TOKEN) ||
-      isPlaceholderEnvValue(WHATSAPP_PHONE_ID)
-    ) {
-      console.warn('WhatsApp credentials are missing or still using placeholder values');
-      return {
-        success: false,
-        error:
-          'WhatsApp service not configured. Set valid WHATSAPP_TOKEN and WHATSAPP_PHONE_ID in backend environment variables.',
-      };
-    }
+  if (
+    isPlaceholderEnvValue(WHATSAPP_TOKEN) ||
+    isPlaceholderEnvValue(WHATSAPP_PHONE_ID)
+  ) {
+    console.warn('WhatsApp credentials are missing or still using placeholder values');
+    return {
+      success: false,
+      error:
+        'WhatsApp service not configured. Set valid WHATSAPP_TOKEN and WHATSAPP_PHONE_ID in backend environment variables.',
+    };
+  }
 
-    const formattedNumber = `91${tenDigitNumber}`;
-    const response = await axios.post(
-      `${WHATSAPP_API_URL}/${WHATSAPP_PHONE_ID}/messages`,
+  const formattedNumber = `${countryCode}${tenDigitNumber}`;
+  const endpoint = `${WHATSAPP_API_URL}/${WHATSAPP_PHONE_ID}/messages`;
+
+  const sendRequest = async (
+    requestPayload: Omit<WhatsAppMessage, 'messaging_product' | 'to'> | Omit<WhatsAppTextMessage, 'messaging_product' | 'to'>
+  ) => {
+    return axios.post(
+      endpoint,
       {
         messaging_product: 'whatsapp',
         to: formattedNumber,
-        ...payload,
+        ...requestPayload,
       },
       {
         headers: {
@@ -155,52 +300,175 @@ async function sendWhatsAppPayload(
         },
       }
     );
+  };
 
-    if (response.data.messages && response.data.messages[0]) {
-      return {
-        success: true,
-        messageId: response.data.messages[0].id,
+  const adjustTemplatePayloadForParamMismatch = (
+    templatePayload: WhatsAppTemplatePayload,
+    details: string
+  ): WhatsAppTemplatePayload | null => {
+    const mismatchMatch = details.match(
+      /(header|body): number of localizable_params \((\d+)\) does not match the expected number of params \((\d+)\)/i
+    );
+
+    if (!mismatchMatch) {
+      return null;
+    }
+
+    const targetComponent = mismatchMatch[1].toLowerCase() as 'header' | 'body';
+    const expectedCount = parseInt(mismatchMatch[3], 10);
+
+    if (!Number.isInteger(expectedCount) || expectedCount < 0) {
+      return null;
+    }
+
+    const components = [...(templatePayload.template.components || [])];
+    const headerIndex = components.findIndex((c) => c.type === 'header');
+    const bodyIndex = components.findIndex((c) => c.type === 'body');
+
+    const headerParams =
+      headerIndex >= 0 ? components[headerIndex].parameters || [] : [];
+    const bodyParams = bodyIndex >= 0 ? components[bodyIndex].parameters || [] : [];
+    const pooledParams = [...headerParams, ...bodyParams];
+
+    const sourceParams =
+      targetComponent === 'header'
+        ? headerParams.length
+          ? headerParams
+          : bodyParams.length
+            ? bodyParams
+            : pooledParams
+        : bodyParams.length
+          ? bodyParams
+          : headerParams.length
+            ? headerParams
+            : pooledParams;
+
+    const adjustedParams = sourceParams.slice(0, expectedCount);
+
+    const targetIndex =
+      targetComponent === 'header' ? headerIndex : bodyIndex;
+
+    if (targetIndex >= 0) {
+      components[targetIndex] = {
+        ...components[targetIndex],
+        parameters: adjustedParams,
       };
+    } else {
+      components.push({
+        type: targetComponent,
+        parameters: adjustedParams,
+      });
     }
 
     return {
-      success: false,
-      error: 'Failed to send message',
+      ...templatePayload,
+      template: {
+        ...templatePayload.template,
+        components,
+      },
     };
-  } catch (error: any) {
-    console.error('WhatsApp API error:', error.response?.data || error.message);
-    return {
-      success: false,
-      error: error.response?.data?.error?.message || 'WhatsApp service error',
-    };
+  };
+
+  let requestPayload = payload;
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const response = await sendRequest(requestPayload);
+
+      if (response.data.messages && response.data.messages[0]) {
+        return {
+          success: true,
+          messageId: response.data.messages[0].id,
+        };
+      }
+
+      return {
+        success: false,
+        error: 'Failed to send message',
+      };
+    } catch (error: any) {
+      const apiError = error.response?.data?.error;
+      const errorDetails = String(apiError?.error_data?.details || '');
+      const isTemplatePayload =
+        (requestPayload as any)?.type === 'template' &&
+        Array.isArray((requestPayload as any)?.template?.components);
+
+      if (
+        apiError?.code === 132000 &&
+        isTemplatePayload &&
+        attempt < 2
+      ) {
+        const adjustedPayload = adjustTemplatePayloadForParamMismatch(
+          requestPayload as WhatsAppTemplatePayload,
+          errorDetails
+        );
+
+        if (adjustedPayload) {
+          requestPayload = adjustedPayload;
+          continue;
+        }
+      }
+
+      if (attempt > 0) {
+        console.error('WhatsApp API retry error:', error.response?.data || error.message);
+      }
+      console.error('WhatsApp API error:', error.response?.data || error.message);
+
+      const detailedError = apiError
+        ? `${apiError.message || 'WhatsApp API error'} (code: ${apiError.code || 'n/a'}, subcode: ${apiError.error_subcode || 'n/a'}, type: ${apiError.type || 'n/a'}, details: ${apiError.error_data?.details || 'n/a'})`
+        : undefined;
+
+      return {
+        success: false,
+        error: detailedError || error.response?.data?.error?.message || 'WhatsApp service error',
+      };
+    }
   }
+
+  return {
+    success: false,
+    error: 'WhatsApp service error',
+  };
+}
+
+function buildTemplatePayload(
+  templateName: string,
+  components: Array<{ type: string; parameters?: Array<{ type: string; text: string }> }>
+): WhatsAppTemplatePayload {
+  const trimmedTemplateName = templateName.trim();
+
+  return {
+    type: 'template',
+    template: {
+      name: trimmedTemplateName,
+      language: {
+        code: WHATSAPP_TEMPLATE_LANGUAGE,
+      },
+      components,
+    },
+  };
 }
 
 export async function sendWhatsAppMessage(
   mobileNumber: string,
   templateType: WhatsAppTemplateType,
-  variables: WhatsAppTemplateVariable
+  variables: WhatsAppTemplateVariable | string[]
 ): Promise<{ success: boolean; messageId?: string; error?: string }> {
   const templateName = templateMap[templateType];
 
-  return sendWhatsAppPayload(mobileNumber, {
-    type: 'template',
-    template: {
-      name: templateName,
-      language: {
-        code: 'en_US',
-      },
-      components: [
-        {
-          type: 'body',
-          parameters: Object.entries(variables).map(([_, value]) => ({
-            type: 'text',
-            text: value,
-          })),
-        },
-      ],
-    },
-  });
+  if (!templateName) {
+    return {
+      success: false,
+      error: `WhatsApp template not configured for ${templateType}`,
+    };
+  }
+
+  const components = resolveTemplateComponents(templateType, variables);
+
+  return sendWhatsAppPayload(
+    mobileNumber,
+    buildTemplatePayload(templateName, components)
+  );
 }
 
 export async function sendLoginOtpMessage(
@@ -208,34 +476,49 @@ export async function sendLoginOtpMessage(
   otp: string,
   expiresInMinutes: number
 ): Promise<{ success: boolean; messageId?: string; error?: string }> {
-  const otpTemplateName = process.env.WHATSAPP_OTP_TEMPLATE;
+  const otpTemplateName = process.env.WHATSAPP_OTP_TEMPLATE?.trim();
+  const isHostedRuntime =
+    process.env.VERCEL === '1' || Boolean(process.env.VERCEL_ENV);
 
   // Prefer template delivery for production reliability; fallback to text for quick setup.
   if (otpTemplateName) {
-    return sendWhatsAppPayload(mobileNumber, {
-      type: 'template',
-      template: {
-        name: otpTemplateName,
-        language: {
-          code: 'en_US',
-        },
-        components: [
-          {
-            type: 'body',
-            parameters: [
+    const otpTemplateVariables = otpTemplateParamKeys.length
+      ? otpTemplateParamKeys
+          .map((key) => {
+            if (key === 'otp') return otp;
+            if (key === 'expires_in_minutes' || key === 'expiresInMinutes') {
+              return String(expiresInMinutes);
+            }
+            return undefined;
+          })
+          .filter((value): value is string => value !== undefined)
+      : [otp, String(expiresInMinutes)];
+
+    return sendWhatsAppPayload(
+      mobileNumber,
+      buildTemplatePayload(
+        otpTemplateName,
+        otpTemplateVariables.length
+          ? [
               {
-                type: 'text',
-                text: otp,
+                type: 'body',
+                parameters: otpTemplateVariables.map((value) => ({
+                  type: 'text',
+                  text: value,
+                })),
               },
-              {
-                type: 'text',
-                text: String(expiresInMinutes),
-              },
-            ],
-          },
-        ],
-      },
-    });
+            ]
+          : []
+      )
+    );
+  }
+
+  if (isHostedRuntime || process.env.NODE_ENV === 'production') {
+    return {
+      success: false,
+      error:
+        'WHATSAPP_OTP_TEMPLATE is required in production/hosted environments. Free-form text OTP is blocked by WhatsApp outside customer care window.',
+    };
   }
 
   return sendWhatsAppPayload(mobileNumber, {
@@ -253,23 +536,41 @@ export async function sendOrderPlacedMessage(
   orderId: string,
   orderDetails?: OrderDetailsMessageInput
 ): Promise<{ success: boolean; messageId?: string; error?: string }> {
-  const templateResult = await sendWhatsAppMessage(mobileNumber, 'order_placed', {
-    token_number: tokenNumber,
-    order_id: orderId,
-  });
+  const templateResult = await sendWhatsAppMessage(
+    mobileNumber,
+    'order_placed',
+    {
+      token_number: tokenNumber,
+      tokenNumber,
+      order_id: orderId,
+      orderId,
+    }
+  );
 
   if (templateResult.success) {
     return templateResult;
   }
 
   if (orderDetails) {
-    return sendWhatsAppPayload(mobileNumber, {
+    const fallbackResult = await sendWhatsAppPayload(mobileNumber, {
       type: 'text',
       text: {
         preview_url: false,
         body: buildOrderPlacedMessage(orderDetails),
       },
     });
+
+    if (fallbackResult.success) {
+      return fallbackResult;
+    }
+
+    return {
+      success: false,
+      error: [
+        `Template failed: ${templateResult.error || 'unknown template error'}`,
+        `Fallback text failed: ${fallbackResult.error || 'unknown fallback error'}`,
+      ].join(' | '),
+    };
   }
 
   return templateResult;
@@ -281,16 +582,24 @@ export async function sendOrderAcceptedMessage(
   locationLink: string,
   tokenNumber?: string
 ): Promise<{ success: boolean; messageId?: string; error?: string }> {
-  const templateResult = await sendWhatsAppMessage(mobileNumber, 'order_accepted', {
-    estimated_time: estimatedTime,
-    location_link: locationLink,
-  });
+  const templateResult = await sendWhatsAppMessage(
+    mobileNumber,
+    'order_accepted',
+    {
+      estimated_time: estimatedTime,
+      estimatedTime,
+      location_link: locationLink,
+      locationLink,
+      token_number: tokenNumber || '',
+      tokenNumber: tokenNumber || '',
+    }
+  );
 
   if (templateResult.success) {
     return templateResult;
   }
 
-  return sendWhatsAppPayload(mobileNumber, {
+  const fallbackResult = await sendWhatsAppPayload(mobileNumber, {
     type: 'text',
     text: {
       preview_url: false,
@@ -304,6 +613,18 @@ export async function sendOrderAcceptedMessage(
         .join('\n'),
     },
   });
+
+  if (fallbackResult.success) {
+    return fallbackResult;
+  }
+
+  return {
+    success: false,
+    error: [
+      `Template failed: ${templateResult.error || 'unknown template error'}`,
+      `Fallback text failed: ${fallbackResult.error || 'unknown fallback error'}`,
+    ].join(' | '),
+  };
 }
 
 export async function sendOrderRejectedMessage(
@@ -315,13 +636,25 @@ export async function sendOrderRejectedMessage(
     return templateResult;
   }
 
-  return sendWhatsAppPayload(mobileNumber, {
+  const fallbackResult = await sendWhatsAppPayload(mobileNumber, {
     type: 'text',
     text: {
       preview_url: false,
       body: 'Your famFood6 order was rejected. If needed, please place a new order or contact support.',
     },
   });
+
+  if (fallbackResult.success) {
+    return fallbackResult;
+  }
+
+  return {
+    success: false,
+    error: [
+      `Template failed: ${templateResult.error || 'unknown template error'}`,
+      `Fallback text failed: ${fallbackResult.error || 'unknown fallback error'}`,
+    ].join(' | '),
+  };
 }
 
 export async function sendOrderReadyMessage(
@@ -329,15 +662,22 @@ export async function sendOrderReadyMessage(
   deliveryPIN: string,
   tokenNumber?: string
 ): Promise<{ success: boolean; messageId?: string; error?: string }> {
-  const templateResult = await sendWhatsAppMessage(mobileNumber, 'order_ready', {
-    delivery_pin: deliveryPIN,
-  });
+  const templateResult = await sendWhatsAppMessage(
+    mobileNumber,
+    'order_ready',
+    {
+      delivery_pin: deliveryPIN,
+      deliveryPIN,
+      token_number: tokenNumber || '',
+      tokenNumber: tokenNumber || '',
+    }
+  );
 
   if (templateResult.success) {
     return templateResult;
   }
 
-  return sendWhatsAppPayload(mobileNumber, {
+  const fallbackResult = await sendWhatsAppPayload(mobileNumber, {
     type: 'text',
     text: {
       preview_url: false,
@@ -350,4 +690,16 @@ export async function sendOrderReadyMessage(
         .join('\n'),
     },
   });
+
+  if (fallbackResult.success) {
+    return fallbackResult;
+  }
+
+  return {
+    success: false,
+    error: [
+      `Template failed: ${templateResult.error || 'unknown template error'}`,
+      `Fallback text failed: ${fallbackResult.error || 'unknown fallback error'}`,
+    ].join(' | '),
+  };
 }

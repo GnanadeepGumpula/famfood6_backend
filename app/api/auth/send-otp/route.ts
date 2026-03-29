@@ -56,11 +56,14 @@ export async function POST(request: NextRequest) {
     );
 
     const expiresInMinutes = Math.max(1, Math.ceil(otpExpirySeconds / 60));
-    const isDevelopment = process.env.NODE_ENV === 'development';
+    const isHostedRuntime =
+      process.env.VERCEL === '1' || Boolean(process.env.VERCEL_ENV);
+    const isLocalDevelopment =
+      process.env.NODE_ENV === 'development' && !isHostedRuntime;
     const exposeDevOtp =
-      isDevelopment && process.env.EXPOSE_DEV_OTP !== 'false';
+      isLocalDevelopment && process.env.EXPOSE_DEV_OTP === 'true';
     const allowDevFallback =
-      isDevelopment && process.env.ALLOW_WHATSAPP_OTP_FALLBACK !== 'false';
+      isLocalDevelopment && process.env.ALLOW_WHATSAPP_OTP_FALLBACK === 'true';
 
     const whatsappResult = await sendLoginOtpMessage(
       mobileNumber,
