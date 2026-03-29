@@ -11,6 +11,7 @@ const endpoints: ApiEndpoint[] = [
   { path: '/api/auth/login-password', methods: ['POST'] },
   { path: '/api/auth/set-password', methods: ['POST'] },
   { path: '/api/auth/change-password', methods: ['POST'] },
+  { path: '/api/health/auth', methods: ['GET'] },
   { path: '/api/menu', methods: ['GET', 'POST'] },
   { path: '/api/menu/:id', methods: ['PUT', 'DELETE'] },
   { path: '/api/orders', methods: ['POST', 'GET'] },

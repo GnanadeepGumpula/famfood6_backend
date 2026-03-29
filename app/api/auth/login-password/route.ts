@@ -13,9 +13,27 @@ const loginPasswordSchema = z.object({
   password: z.string().min(6).max(64),
 });
 
+export async function GET() {
+  const response: ApiResponse = {
+    success: false,
+    error: 'Method not allowed. Use POST /api/auth/login-password with mobileNumber and password.',
+  };
+  return NextResponse.json(response, { status: 405 });
+}
+
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      const response: ApiResponse = {
+        success: false,
+        error: 'Invalid JSON request body',
+      };
+      return NextResponse.json(response, { status: 400 });
+    }
+
     const { mobileNumber: inputMobileNumber, password } = loginPasswordSchema.parse(body);
     const mobileNumber = normalizeMobileNumber(inputMobileNumber);
 
@@ -40,7 +58,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(response, { status: 429 });
     }
 
-    await connectToDatabase();
+    try {
+      await connectToDatabase();
+    } catch {
+      const response: ApiResponse = {
+        success: false,
+        error: 'Authentication service temporarily unavailable. Please try again shortly.',
+      };
+      return NextResponse.json(response, { status: 503 });
+    }
 
     const user = await User.findOne({ mobileNumber });
     if (!user) {
@@ -83,11 +109,20 @@ export async function POST(request: NextRequest) {
       .filter(Boolean);
     const role: 'admin' | 'user' = adminPhones.includes(mobileNumber) ? 'admin' : 'user';
 
-    const token = signToken({
-      userId: user._id.toString(),
-      mobileNumber,
-      role,
-    });
+    let token: string;
+    try {
+      token = signToken({
+        userId: user._id.toString(),
+        mobileNumber,
+        role,
+      });
+    } catch {
+      const response: ApiResponse = {
+        success: false,
+        error: 'Authentication server misconfiguration. Please contact support.',
+      };
+      return NextResponse.json(response, { status: 500 });
+    }
 
     await User.findByIdAndUpdate(user._id, {
       $set: {
